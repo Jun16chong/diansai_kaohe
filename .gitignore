@@ -1,0 +1,28 @@
+# Keil MDK build outputs
+*.uvgui.*
+*.uvguix.*
+*.scvd
+*.dbgconf
+*.crf
+*.d
+*.o
+*.axf
+*.dep
+*.lnp
+*.plg
+*.iex
+*.sct
+*.lst
+*.map
+*.htm
+*.build_log.htm
+*.tra
+*.hex
+
+# Keil project backup
+*.uvprojx.bak
+*.uvoptx.bak
+
+# Objects and Listings folders
+Objects/
+Listings/
