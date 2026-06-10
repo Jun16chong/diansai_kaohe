@@ -48,6 +48,21 @@ Time_Achanges = 0
 Time_Bchanges = 0
 Time_Cchanges = 0
 
+# === 闪烁计数 (发挥部分2: 接收LED发送的数字) ===
+# 状态机: IDLE → LISTENING → DECODED
+blink_state = 0         # 0=IDLE, 1=LISTENING, 2=DECODED
+blink_led = 0            # 当前在闪烁的LED编号 (1=A, 2=B, 3=C)
+blink_count_A = 0        # A灯闪烁计数
+blink_count_B = 0        # B灯闪烁计数
+blink_count_C = 0        # C灯闪烁计数
+blink_last_A = False     # A灯上一帧是否在低亮度
+blink_last_B = False     # B灯上一帧是否在低亮度
+blink_last_C = False     # C灯上一帧是否在低亮度
+blink_stable_cnt = 0     # 连续稳定帧计数 (用于判断闪烁结束)
+decoded_num_A = -1       # 解码出的数字 (-1=未收到)
+decoded_num_B = -1
+decoded_num_C = -1
+
 # === 函数: 取 array1 最大 3 个值在 array2 中的索引 ===
 # NOTE: 原 K210 代码中 sorted(array1) 未赋值, array1 实际未排序
 # 此处保留相同行为以确保算法一致
@@ -276,58 +291,87 @@ while True:
                 Bx, By, BS = x3, y3, S3
                 Cx, Cy, CS = x1, y1, S1
 
-                # === LED 闪烁频率检测 (仅情况6, 与原 K210 代码一致) ===
-                # 注: 原代码此段缩进在情况6内部, 非 bug, 保留
-                AS_changes = abs(AS - AS2) / AS if AS > 0 else 0
-                BS_changes = abs(BS - BS2) / BS if BS > 0 else 0
-                CS_changes = abs(CS - CS2) / CS if CS > 0 else 0
-                AS2 = AS
-                BS2 = BS
-                CS2 = CS
+            # === LED 闪烁检测 & 数字解码 (所有情况通用, 不再局限于情况6) ===
+            # 注: 原代码频率检测缩进在情况6内部 → 已修复, 移到此处对所有情况生效
+            AS_changes = abs(AS - AS2) / AS if AS > 0 else 0
+            BS_changes = abs(BS - BS2) / BS if BS > 0 else 0
+            CS_changes = abs(CS - CS2) / CS if CS > 0 else 0
+            AS2 = AS
+            BS2 = BS
+            CS2 = CS
 
-                # A 灯频率变化检测
-                if AS_changes > 0.15 and flag == 1:
-                    tim.init(period=100, mode=Timer.PERIODIC, callback=on_timer)
-                    flag = 0
-                if AS_changes > 0.15 and flag == 0 and Time >= 5:
-                    tim.deinit()
-                    flag = 1
-                    Time_Achanges = Time * 0.1
-                    Time_Bchanges = 0
-                    Time_Cchanges = 0
-                    Time = 0
+            # 闪烁边沿检测: 面积变化 >15% 且从亮→暗 = 一次闪烁开始
+            DARK_THRESH = 0.15
+            STABLE_FRAMES = 15      # 连续稳定帧数, 判定闪烁结束
 
-                # B 灯频率变化检测
-                if BS_changes > 0.15 and flag == 1:
-                    tim.init(period=100, mode=Timer.PERIODIC, callback=on_timer)
-                    flag = 0
-                if BS_changes > 0.15 and flag == 0 and Time >= 5:
-                    tim.deinit()
-                    flag = 1
-                    Time_Bchanges = Time * 0.1
-                    Time_Achanges = 0
-                    Time_Cchanges = 0
-                    Time = 0
+            # A灯边沿检测
+            a_dark_now = (AS_changes > DARK_THRESH and AS < AS2)
+            if a_dark_now and not blink_last_A:
+                blink_count_A += 1          # 上升沿 (亮→暗), 计数+1
+            blink_last_A = a_dark_now
 
-                # C 灯频率变化检测
-                if CS_changes > 0.15 and flag == 1:
-                    tim.init(period=100, mode=Timer.PERIODIC, callback=on_timer)
-                    flag = 0
-                if CS_changes > 0.15 and flag == 0 and Time >= 5:
-                    tim.deinit()
-                    flag = 1
-                    Time_Cchanges = Time * 0.1
-                    Time_Achanges = 0
-                    Time_Bchanges = 0
-                    Time = 0
+            # B灯边沿检测
+            b_dark_now = (BS_changes > DARK_THRESH and BS < BS2)
+            if b_dark_now and not blink_last_B:
+                blink_count_B += 1
+            blink_last_B = b_dark_now
 
-            # === 绘制频率检测结果 (三灯模式通用) ===
-            tmp = img.draw_string(3, 150, "A Time=%d" % (round(Time_Achanges)),
-                                   color=(0, 0, 255), scale=2)
-            tmp = img.draw_string(3, 180, "B Time=%d" % (round(Time_Bchanges)),
-                                   color=(0, 0, 255), scale=2)
-            tmp = img.draw_string(3, 210, "C Time=%d" % (round(Time_Cchanges)),
-                                   color=(0, 0, 255), scale=2)
+            # C灯边沿检测
+            c_dark_now = (CS_changes > DARK_THRESH and CS < CS2)
+            if c_dark_now and not blink_last_C:
+                blink_count_C += 1
+            blink_last_C = c_dark_now
+
+            # 判断哪个灯在闪烁 (任一灯的计数在增长)
+            any_blinking = (a_dark_now or b_dark_now or c_dark_now or
+                            blink_last_A or blink_last_B or blink_last_C)
+
+            if any_blinking:
+                blink_stable_cnt = 0
+                if blink_state == 0:
+                    blink_state = 1     # 进入监听状态
+            else:
+                blink_stable_cnt += 1
+
+            # 连续稳定 STABLE_FRAMES 帧 → 闪烁结束, 锁存解码结果
+            if blink_state == 1 and blink_stable_cnt >= STABLE_FRAMES:
+                blink_state = 2         # 解码完成
+
+                if blink_count_A > 0:
+                    decoded_num_A = blink_count_A
+                if blink_count_B > 0:
+                    decoded_num_B = blink_count_B
+                if blink_count_C > 0:
+                    decoded_num_C = blink_count_C
+
+                # 解码结果通过 UART 发送 (CMD=0x02: 数字信息)
+                dec_num = decoded_num_A if decoded_num_A >= 0 else (
+                          decoded_num_B if decoded_num_B >= 0 else decoded_num_C)
+                if dec_num >= 0:
+                    uart_send_position(0x02, dec_num, 0, 0)
+
+                # 重置计数器, 准备下一次接收
+                blink_count_A = 0
+                blink_count_B = 0
+                blink_count_C = 0
+                blink_last_A = False
+                blink_last_B = False
+                blink_last_C = False
+                blink_state = 0
+
+            # === 绘制闪烁检测和解码结果 ===
+            tmp = img.draw_string(3, 140, "Blink A:%d B:%d C:%d" %
+                                   (blink_count_A, blink_count_B, blink_count_C),
+                                   color=(0, 255, 0), scale=2)
+            if decoded_num_A >= 0:
+                tmp = img.draw_string(3, 160, "NUM_A=%d" % decoded_num_A,
+                                       color=(255, 255, 0), scale=2)
+            if decoded_num_B >= 0:
+                tmp = img.draw_string(3, 182, "NUM_B=%d" % decoded_num_B,
+                                       color=(255, 255, 0), scale=2)
+            if decoded_num_C >= 0:
+                tmp = img.draw_string(3, 204, "NUM_C=%d" % decoded_num_C,
+                                       color=(255, 255, 0), scale=2)
 
             # 绘制三灯十字标
             tmp = img.draw_cross(x1, y1, color=(255, 0, 0))
@@ -347,15 +391,14 @@ while True:
             yy = -(y0 - 120) / 4.9
             Xab = Bx - Ax
             Yab = By - Ay
-            if Xab == 0:
-                angle = 90
-            if Xab > 0:
-                angle = -(math.atan(Yab / Xab) * 180) / 3.1415
-            if Xab < 0:
-                angle = -(math.atan(Yab / Xab) * 180) / 3.1415 + 180
+            # 使用 atan2 替代 atan：自动处理所有象限和除零问题
+            angle = -(math.atan2(Yab, Xab) * 180) / math.pi
+            # 归一化到 [-180, 180]
             if angle > 180:
                 angle = angle - 360
-            angle2 = angle * 3.1415 / 180
+            if angle < -180:
+                angle = angle + 360
+            angle2 = angle * math.pi / 180
 
             tmp = img.draw_string(160, 30, "angle=%d" % angle,
                                    color=(0, 0, 255), scale=2)
@@ -367,11 +410,11 @@ while True:
             # 每 500ms 更新世界坐标计算
             if Time2 == 1:
                 Time2 = 0
-                if yy != 0:
-                    XX = -math.pow(xx * xx + yy * yy, 0.5) * \
-                         math.sin(angle2 + math.atan(xx / yy))
-                    YY = -math.pow(xx * xx + yy * yy, 0.5) * \
-                         math.cos(angle2 + math.atan(xx / yy))
+                R = math.sqrt(xx * xx + yy * yy)
+                if R > 0.01:        # 避免除零 (替代旧 yy != 0 检查)
+                    theta = math.atan2(xx, yy)   # atan2 自动处理所有象限
+                    XX = -R * math.sin(angle2 + theta)
+                    YY = -R * math.cos(angle2 + theta)
 
             # 根据 y0 位置分上下半屏显示坐标 (原 K210 逻辑)
             if y0 > 120:
