@@ -1,3 +1,4 @@
+
 #include "stm32f10x.h"
 #include "sys.h"
 #include "delay.h"
@@ -44,7 +45,7 @@ int main()
 			TIM_SetCompare1(TIM2,999);
 		}
 		*/
-	
+
 		if(flag_led==1)
 		{
 			if(flag==1)
@@ -122,6 +123,52 @@ int main()
 
 
 
+//≤‚ ‘LED…¡À∏ PA0 ? 5 ? ? PA1 ? 5 ? ? PA2 ? 5 ? ? ?????????,?????
+/*
+#include "stm32f10x.h"
+#include "sys.h"
+#include "delay.h"
+#include "PWM.h"
 
+int main()
+{
+    int i;                          // ???????????(C89)
+    
+    delay_init();
+    PWM_Init1(999, 719);            // 100Hz PWM, PA0/PA1/PA2
+
+    while(1)
+    {
+        // PA0 ?? 5 ?
+        for(i = 0; i < 5; i++)
+        {
+            TIM_SetCompare1(TIM2, 0);     // PA0 ?
+            delay_ms(200);
+            TIM_SetCompare1(TIM2, 999);   // PA0 ?
+            delay_ms(200);
+        }
+
+        // PA1 ?? 5 ?
+        for(i = 0; i < 5; i++)
+        {
+            TIM_SetCompare2(TIM2, 0);     // PA1 ?
+            delay_ms(200);
+            TIM_SetCompare2(TIM2, 999);   // PA1 ?
+            delay_ms(200);
+        }
+
+        // PA2 ?? 5 ?
+        for(i = 0; i < 5; i++)
+        {
+            TIM_SetCompare3(TIM2, 0);     // PA2 ?
+            delay_ms(200);
+            TIM_SetCompare3(TIM2, 999);   // PA2 ?
+            delay_ms(200);
+        }
+
+        delay_ms(1000);  // ? 1 ?????
+    }
+}
+*/
 
 
